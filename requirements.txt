@@ -4,3 +4,5 @@ matplotlib
 fpdf
 sqlalchemy
 openpyxl
+pdfplumber
+tabula-py

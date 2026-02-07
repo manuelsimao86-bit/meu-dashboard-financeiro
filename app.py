@@ -2,113 +2,121 @@ import streamlit as st
 import pandas as pd
 import pdfplumber
 import matplotlib.pyplot as plt
-from fpdf import FPDF
-import io
 
-# 1. Configuração da Página
+# 1. Configuração de Especialista
 st.set_page_config(page_title="FinAnalysis Angola PRO", layout="wide", page_icon="🇦🇴")
 
-st.title("🇦🇴 FinAnalysis Angola | Gestão Sénior")
+st.title("🇦🇴 FinAnalysis Angola | Analista de Orçamento Familiar")
 st.markdown("---")
 
-# 2. Funções de Suporte (A Inteligência do Sistema)
-
-def limpar_moeda(valor):
-    """Converte strings de Kwanza (ex: 1.500,00) em números decimais."""
-    if pd.isna(valor) or valor == "":
+# 2. Funções de Limpeza e Inteligência
+def converter_kwanza(valor):
+    if pd.isna(valor) or valor == "" or str(valor).lower() == "none":
         return 0.0
-    s = str(valor).strip().replace('.', '').replace(',', '.')
+    s = str(valor).strip().replace(' ', '').replace('.', '').replace(',', '.')
     try:
         return float(s)
     except:
         return 0.0
 
-def processar_pdf(file):
-    """Lê tabelas de PDFs, ideal para Mapas de Amortização e Extratos."""
-    dados_finais = []
+def categorizar_movimento(descricao):
+    """Inteligência para agrupar movimentos familiares e profissionais em Angola."""
+    desc = str(descricao).upper()
+    
+    if any(palavra in desc for palavra in ["KERO", "SHOPRITE", "CANDANDO", "MAXI", "SUPERMERCADO", "ALIMENTAR"]):
+        return "🍎 Alimentação & Supermercado"
+    elif any(palavra in desc for palavra in ["UNITEL", "AFRICEL", "ZAP", "DSTV", "INTERNET", "ENDE", "EPAL"]):
+        return "🏠 Contas de Casa (Luz/Água/Tel)"
+    elif any(palavra in desc for palavra in ["RESTAURANTE", "CAFE", "BAR", "LAZER", "CINEMA"]):
+        return "🍹 Lazer & Restaurantes"
+    elif any(palavra in desc for palavra in ["FARMACIA", "HOSPITAL", "CLINICA", "CENTRO MEDICO"]):
+        return "⚕️ Saúde"
+    elif any(palavra in desc for palavra in ["TAXA", "AGT", "IRT", "IMPOSTO", "SEGURANCA SOCIAL"]):
+        return "🏛️ Impostos & Taxas AGT"
+    elif any(palavra in desc for palavra in ["ESCOLA", "FACULDADE", "LIVRARIA", "COLEGIO", "PROPINAS"]):
+        return "📚 Educação"
+    elif any(palavra in desc for palavra in ["COMBUSTIVEL", "SONANGOL", "PUMA", "GASOLINA", "MECANICO"]):
+        return "🚗 Transporte & Viatura"
+    elif any(palavra in desc for palavra in ["SALARIO", "VENCIMENTO", "TRANSFERENCIA RECEBIDA", "HONORARIOS"]):
+        return "💰 Receitas & Rendimentos"
+    else:
+        return "📦 Outros Gastos"
+
+def processar_pdf_inteligente(file):
+    dados = []
     with pdfplumber.open(file) as pdf:
-        for pagina in pdf.pages:
-            tabela = pagina.extract_table()
-            if tabela:
-                dados_finais.extend(tabela)
+        for page in pdf.pages:
+            tabela = page.extract_table()
+            if tabela: dados.extend(tabela)
+    if not dados: return pd.DataFrame()
     
-    if not dados_finais:
-        return pd.DataFrame()
+    df_temp = pd.DataFrame(dados)
+    # Localizar cabeçalho (Data/Descritivo)
+    linha_mestre = 0
+    for i, row in df_temp.iterrows():
+        txt = " ".join(map(str, row.values)).lower()
+        if 'data' in txt and ('descritivo' in txt or 'movimento' in txt):
+            linha_mestre = i
+            break
     
-    # Criar DataFrame e usar a primeira linha como cabeçalho
-    df = pd.DataFrame(dados_finais[1:], columns=dados_finais[0])
+    df = pd.DataFrame(dados[linha_mestre+1:], columns=dados[linha_mestre])
     return df
 
-# 3. Interface de Utilizador (Sidebar)
-st.sidebar.header("Configurações")
-uploaded_file = st.sidebar.file_uploader("Carregue Extrato ou Mapa (PDF, XLSX, CSV)", type=["pdf", "xlsx", "csv"])
+# 3. Sidebar
+st.sidebar.header("📁 Gestão de Documentos")
+uploaded_file = st.sidebar.file_uploader("Carregue o Extrato Bancário", type=["pdf"])
 
-# 4. Processamento de Dados
 if uploaded_file:
-    # Identificar tipo de ficheiro
-    extensao = uploaded_file.name.split('.')[-1].lower()
+    df = processar_pdf_inteligente(uploaded_file)
     
-    with st.spinner('A processar ficheiro...'):
-        if extensao == 'pdf':
-            df = processar_pdf(uploaded_file)
-            st.success("✅ PDF lido com sucesso!")
-        elif extensao == 'xlsx':
-            df = pd.read_excel(uploaded_file)
-            st.success("✅ Excel carregado!")
-        else:
-            df = pd.read_csv(uploaded_file)
-            st.success("✅ CSV carregado!")
-
-    # Verificar se o DataFrame tem dados
     if not df.empty:
-        st.write("### 📋 Visualização de Dados Brutos")
-        # Limpeza básica: remove colunas ou linhas totalmente vazias
-        df = df.dropna(axis=1, how='all').dropna(axis=0, how='all')
-        st.dataframe(df, use_container_width=True)
-
-        # 5. Análise de Valores (Tentativa Automática)
-        st.markdown("---")
-        st.write("### 📊 Análise Financeira Automática")
-        
-        # Tentar converter todas as colunas que parecem números
+        # 4. Tratamento de Colunas
+        col_desc = ""
         for col in df.columns:
-            if df[col].dtype == 'object':
-                # Testa se a coluna tem números formatados como texto
-                df[col + "_num"] = df[col].apply(limpar_moeda)
-        
-        # Filtrar apenas colunas que conseguimos converter em números reais
-        df_numerico = df.select_dtypes(include=['number'])
-        
-        if not df_numerico.empty:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.write("**Totais Calculados:**")
-                st.write(df_numerico.sum())
-            
-            with col2:
-                st.write("**Gráfico de Tendência:**")
-                st.bar_chart(df_numerico.iloc[:, :2]) # Mostra as primeiras 2 colunas numéricas
+            nome = str(col).lower()
+            if 'débito' in nome or 'debito' in nome: df['DEBITO'] = df[col].apply(converter_kwanza)
+            if 'crédito' in nome or 'credito' in nome: df['CREDITO'] = df[col].apply(converter_kwanza)
+            if 'descritivo' in nome or 'descrição' in nome or 'movimento' in nome: col_desc = col
+
+        # Aplicar Categorização
+        if col_desc:
+            df['Categoria'] = df[col_desc].apply(categorizar_movimento)
         else:
-            st.warning("Não foram detetadas colunas numéricas claras para gerar gráficos automáticos.")
+            df['Categoria'] = "📦 Outros Gastos"
 
-        # 6. Exportação de Relatório
-        st.sidebar.markdown("---")
-        if st.sidebar.button("📑 Gerar Relatório PDF"):
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Arial", 'B', 16)
-            pdf.cell(200, 10, "Relatório FinAnalysis Angola", ln=True, align='C')
-            pdf.ln(10)
-            pdf.set_font("Arial", size=12)
-            pdf.cell(200, 10, f"Ficheiro analisado: {uploaded_file.name}", ln=True)
-            pdf.cell(200, 10, f"Data da análise: {pd.Timestamp.now().strftime('%d/%m/%Y')}", ln=True)
+        # 5. DASHBOARD PRINCIPAL
+        st.success(f"✅ Análise do Extrato concluída com sucesso!")
+        
+        t_deb = df['DEBITO'].sum() if 'DEBITO' in df.columns else 0
+        t_cre = df['CREDITO'].sum() if 'CREDITO' in df.columns else 0
+        
+        m1, m2, m3 = st.columns(3)
+        m1.metric("TOTAL DE ENTRADAS", f"{t_cre:,.2f} Kz")
+        m2.metric("TOTAL DE GASTOS", f"{t_deb:,.2f} Kz")
+        m3.metric("SALDO DISPONÍVEL", f"{(t_cre - t_deb):,.2f} Kz")
+
+        # 6. AGRUPAMENTO FAMILIAR (O seu pedido)
+        st.markdown("---")
+        st.subheader("👨‍👩‍👧‍ internal Resumo de Gastos Familiares")
+        
+        if 'DEBITO' in df.columns:
+            # Agrupar apenas os débitos por categoria
+            resumo_familiar = df[df['DEBITO'] > 0].groupby('Categoria')['DEBITO'].sum().sort_values(ascending=False)
             
-            # Gerar o binário do PDF
-            pdf_output = pdf.output(dest='S').encode('latin-1')
-            st.sidebar.download_button("📥 Baixar Relatório", data=pdf_output, file_name="Relatorio_Angola.pdf")
+            c1, c2 = st.columns([1, 1])
+            with c1:
+                st.write("**Gastos por Grupo:**")
+                st.table(resumo_familiar.map(lambda x: f"{x:,.2f} Kz"))
+            
+            with c2:
+                fig, ax = plt.subplots()
+                resumo_familiar.plot.pie(autopct='%1.1f%%', ax=ax, cmap='viridis')
+                ax.set_ylabel('')
+                st.pyplot(fig)
 
-    else:
-        st.error("O ficheiro parece estar vazio ou não contém tabelas legíveis.")
+        st.markdown("---")
+        st.write("#### 📋 Lista Detalhada com Categorias")
+        st.dataframe(df.dropna(axis=1, how='all'), use_container_width=True)
+
 else:
-    st.info("Aguardando carregamento de ficheiro no menu lateral para iniciar a análise financeira.")
+    st.info("Por favor, carregue o extrato PDF para ver o agrupamento de despesas.")
